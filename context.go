@@ -5,10 +5,8 @@ type PluginContext interface {
 	// 扩展点注册
 	RegisterTaskHandler(id string, name string, description string, handler TaskHandler) error
 	RegisterSiteBrowser(id string, name string, description string, browser SiteBrowser) error
-	RegisterSlot(id string, name string, description string, slotType SlotType, content string, contentType ContentType, title string, icon string, order int) error
 
 	// 扩展点注销
-	UnregisterSlot(id string) error
 	UnregisterSiteBrowser(id string) error
 
 	// 插件数据持久化
