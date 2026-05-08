@@ -12,8 +12,10 @@ type RPCClient struct {
 	codec  *FrameCodec
 	writer *FrameWriter
 	nextID atomic.Int64
-	pending map[int64]chan *rpcResponse
-	mu      sync.RWMutex
+	pending  map[int64]chan *rpcResponse
+	mu       sync.RWMutex
+	done     chan struct{}
+	closeOnce sync.Once
 }
 
 type rpcRequest struct {
@@ -38,10 +40,16 @@ type rpcError struct {
 // NewRPCClient 创建 JSON-RPC 客户端
 func NewRPCClient(codec *FrameCodec) *RPCClient {
 	return &RPCClient{
-		codec:  codec,
-		writer: NewFrameWriter(codec),
+		codec:   codec,
+		writer:  NewFrameWriter(codec),
 		pending: make(map[int64]chan *rpcResponse),
+		done:    make(chan struct{}),
 	}
+}
+
+// Close 关闭客户端，解除所有阻塞的 Call
+func (c *RPCClient) Close() {
+	c.closeOnce.Do(func() { close(c.done) })
 }
 
 // Call 发送 JSON-RPC 请求并等待响应（同步）
@@ -81,7 +89,12 @@ func (c *RPCClient) Call(method string, params, result any) error {
 		c.mu.Unlock()
 	}()
 
-	resp := <-ch
+	var resp *rpcResponse
+	select {
+	case resp = <-ch:
+	case <-c.done:
+		return ErrPluginCrashed
+	}
 	if resp.Error != nil {
 		return fmt.Errorf("rpc error %d: %s", resp.Error.Code, resp.Error.Message)
 	}
