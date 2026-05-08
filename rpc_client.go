@@ -9,27 +9,27 @@ import (
 
 // JSON-RPC 2.0 客户端（供插件侧使用，向主进程发送请求并等待响应）
 type RPCClient struct {
-	codec  *FrameCodec
-	writer *FrameWriter
-	nextID atomic.Int64
-	pending  map[int64]chan *rpcResponse
-	mu       sync.RWMutex
-	done     chan struct{}
+	codec     *FrameCodec
+	writer    *FrameWriter
+	nextID    atomic.Int64
+	pending   map[int64]chan *rpcResponse
+	mu        sync.RWMutex
+	done      chan struct{}
 	closeOnce sync.Once
 }
 
 type rpcRequest struct {
 	JSONRPC string          `json:"jsonrpc"`
-	ID     int64           `json:"id"`
-	Method string          `json:"method"`
-	Params json.RawMessage `json:"params,omitempty"`
+	ID      int64           `json:"id"`
+	Method  string          `json:"method"`
+	Params  json.RawMessage `json:"params,omitempty"`
 }
 
 type rpcResponse struct {
 	JSONRPC string          `json:"jsonrpc"`
-	ID     int64           `json:"id"`
-	Result json.RawMessage `json:"result,omitempty"`
-	Error  *rpcError       `json:"error,omitempty"`
+	ID      int64           `json:"id"`
+	Result  json.RawMessage `json:"result,omitempty"`
+	Error   *rpcError       `json:"error,omitempty"`
 }
 
 type rpcError struct {
@@ -58,8 +58,8 @@ func (c *RPCClient) Call(method string, params, result any) error {
 
 	req := rpcRequest{
 		JSONRPC: "2.0",
-		ID:     id,
-		Method: method,
+		ID:      id,
+		Method:  method,
 	}
 	if params != nil {
 		data, err := json.Marshal(params)
@@ -74,10 +74,7 @@ func (c *RPCClient) Call(method string, params, result any) error {
 		return fmt.Errorf("marshal request: %w", err)
 	}
 
-	if err := c.writer.WriteJSON(reqData); err != nil {
-		return fmt.Errorf("send request: %w", err)
-	}
-
+	// 先注册 pending channel，再发送请求，避免响应在注册前到达被丢弃
 	ch := make(chan *rpcResponse, 1)
 	c.mu.Lock()
 	c.pending[id] = ch
@@ -88,6 +85,13 @@ func (c *RPCClient) Call(method string, params, result any) error {
 		delete(c.pending, id)
 		c.mu.Unlock()
 	}()
+
+	if err := c.writer.WriteJSON(reqData); err != nil {
+		c.mu.Lock()
+		delete(c.pending, id)
+		c.mu.Unlock()
+		return fmt.Errorf("send request: %w", err)
+	}
 
 	var resp *rpcResponse
 	select {
